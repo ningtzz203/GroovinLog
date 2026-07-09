@@ -1,0 +1,12 @@
+node_modules
+.next
+out
+.vercel
+work
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Local backup files created during iteration
+app/**/page 2.tsx
