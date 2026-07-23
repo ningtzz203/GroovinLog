@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { getSupabasePublicEnv } from "./env";
-import { loadSupabaseSsr } from "./runtime";
 
 type CookieToSet = {
   name: string;
@@ -9,7 +9,6 @@ type CookieToSet = {
 };
 
 export async function updateSession(request: NextRequest) {
-  const { createServerClient } = await loadSupabaseSsr();
   let response = NextResponse.next({ request });
   const { url, publishableKey } = getSupabasePublicEnv();
 
