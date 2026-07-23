@@ -29,7 +29,7 @@ export async function updateSession(request: NextRequest) {
         });
       },
     },
-  }) as { auth: { getClaims: () => Promise<unknown> } };
+  }) as unknown as { auth: { getClaims: () => Promise<unknown> } };
 
   await supabase.auth.getClaims();
   return response;

@@ -1,6 +1,6 @@
+import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { getSupabasePublicEnv } from "./env";
-import { loadSupabaseSsr } from "./runtime";
 
 type CookieToSet = {
   name: string;
@@ -9,7 +9,6 @@ type CookieToSet = {
 };
 
 export async function createClient() {
-  const { createServerClient } = await loadSupabaseSsr();
   const cookieStore = await cookies();
   const { url, publishableKey } = getSupabasePublicEnv();
 
@@ -29,7 +28,7 @@ export async function createClient() {
         }
       },
     },
-  }) as {
+  }) as unknown as {
     auth: {
       exchangeCodeForSession: (code: string) => Promise<{ error: Error | null }>;
       getUser: () => Promise<{ data: { user: { id: string; email?: string | null } | null }; error: Error | null }>;
@@ -38,7 +37,7 @@ export async function createClient() {
       signOut: () => Promise<{ error: Error | null }>;
     };
     from: (table: string) => {
-      upsert: (value: Record<string, unknown>, options?: Record<string, unknown>) => Promise<{ error: Error | null }>;
+      upsert: (value: Record<string, unknown>, options?: Record<string, unknown>) => PromiseLike<{ error: Error | null }>;
     };
   };
 }
