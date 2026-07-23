@@ -1,10 +1,11 @@
-export type IconName = "home" | "plus" | "practice" | "review" | "arrow" | "clock" | "play" | "spark" | "calendar";
+export type IconName = "home" | "plus" | "practice" | "review" | "settings" | "arrow" | "clock" | "play" | "spark" | "calendar";
 
 const paths: Record<IconName, React.ReactNode> = {
   home: <><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5M9 21v-6h6v6"/></>,
   plus: <><path d="M12 5v14M5 12h14"/></>,
   practice: <><path d="M5 8.5h14M5 15.5h14M8 5v7M16 12v7"/><circle cx="8" cy="15.5" r="2"/><circle cx="16" cy="8.5" r="2"/></>,
   review: <><path d="M4 19V8M10 19V4M16 19v-7M22 19H2"/></>,
+  settings: <><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5 6.8 15M17.2 9l2.6-1.5"/></>,
   arrow: <><path d="m9 18 6-6-6-6"/></>,
   clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
   play: <><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4Z"/></>,

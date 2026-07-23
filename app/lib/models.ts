@@ -3,6 +3,8 @@ export const FOCUS_TAGS = [
   "Groove", "协调", "Isolation", "控制", "Musicality", "Texture", "Freestyle", "体能",
 ] as const;
 
+export const DEFAULT_PRACTICE_DURATION_OPTIONS = [5, 10, 15, 20, 30] as const;
+
 export type VideoReferenceType = "album_note" | "local_filename" | "cloud_link" | "external_link";
 
 export type VideoReference = {
@@ -64,6 +66,13 @@ export type WeeklyReflection = {
   nextFocusNote: string;
   nextFocusTags: string[];
   updatedAt: string;
+};
+
+export type AppPreferences = {
+  defaultPracticeDurationMinutes: number;
+  practiceQueueSortOrder: "newest" | "oldest";
+  showDifficulty: boolean;
+  showBodyStatus: boolean;
 };
 
 export function taskDuration(task: PracticeTask) {

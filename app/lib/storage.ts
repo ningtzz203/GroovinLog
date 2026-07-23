@@ -1,9 +1,45 @@
-import { ClassReview, PracticeLog, PracticeTask, WeeklyReflection } from "./models";
+import { AppPreferences, ClassReview, PracticeLog, PracticeTask, WeeklyReflection } from "./models";
 
 const STORAGE_KEY = "groovinlog.class-reviews.v1";
 const STANDALONE_TASKS_KEY = "groovinlog.standalone-tasks.v1";
 const PRACTICE_LOGS_KEY = "groovinlog.practice-logs.v1";
 const WEEKLY_REFLECTIONS_KEY = "groovinlog.weekly-reflections.v1";
+const PREFERENCES_KEY = "groovinlog.preferences.v1";
+
+export const DEFAULT_PREFERENCES: AppPreferences = {
+  defaultPracticeDurationMinutes: 20,
+  practiceQueueSortOrder: "newest",
+  showDifficulty: false,
+  showBodyStatus: false,
+};
+
+function normalizePreferences(value: Partial<AppPreferences> | null): AppPreferences {
+  const minutes = Number(value?.defaultPracticeDurationMinutes);
+  const sortOrder = value?.practiceQueueSortOrder;
+  return {
+    defaultPracticeDurationMinutes:Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : DEFAULT_PREFERENCES.defaultPracticeDurationMinutes,
+    practiceQueueSortOrder:sortOrder === "oldest" ? "oldest" : DEFAULT_PREFERENCES.practiceQueueSortOrder,
+    showDifficulty:value?.showDifficulty === true,
+    showBodyStatus:value?.showBodyStatus === true,
+  };
+}
+
+export function readPreferences(): AppPreferences {
+  if (typeof window === "undefined") return DEFAULT_PREFERENCES;
+  try {
+    const value = window.localStorage.getItem(PREFERENCES_KEY);
+    return value ? normalizePreferences(JSON.parse(value) as Partial<AppPreferences>) : DEFAULT_PREFERENCES;
+  } catch {
+    return DEFAULT_PREFERENCES;
+  }
+}
+
+export function savePreferences(preferences: Partial<AppPreferences>) {
+  const next = normalizePreferences({ ...readPreferences(), ...preferences });
+  window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(next));
+  window.dispatchEvent(new Event("groovinlog:updated"));
+  return next;
+}
 
 export function readClassReviews(): ClassReview[] {
   if (typeof window === "undefined") return [];
@@ -19,6 +55,14 @@ export function saveClassReview(review: ClassReview) {
   const existing = readClassReviews().filter(item => item.id !== review.id);
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify([review, ...existing]));
   window.dispatchEvent(new Event("groovinlog:updated"));
+}
+
+export function appendPracticeTasksToClassReview(reviewId: string, tasks: PracticeTask[]) {
+  const reviews = readClassReviews();
+  const nextReviews = reviews.map(review => review.id === reviewId ? { ...review, tasks:[...tasks, ...review.tasks] } : review);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextReviews));
+  window.dispatchEvent(new Event("groovinlog:updated"));
+  return nextReviews.find(review => review.id === reviewId);
 }
 
 export function readPracticeTasks(): PracticeTask[] {

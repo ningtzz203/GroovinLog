@@ -4,9 +4,10 @@ import { Icon, IconName } from "./icons";
 export function AppShell({ children, active }: { children: React.ReactNode; active: string }) {
   const items: { href: string; label: string; icon: IconName }[] = [
     { href: "/", label: "首页", icon: "home" },
-    { href: "/add-class", label: "课程复盘", icon: "plus" },
+    { href: "/add-class", label: "课程", icon: "plus" },
     { href: "/practice", label: "练习", icon: "practice" },
-    { href: "/weekly-review", label: "本周复盘", icon: "review" },
+    { href: "/weekly-review", label: "复盘", icon: "review" },
+    { href: "/settings", label: "设置", icon: "settings" },
   ];
   return <div className="app-shell"><main>{children}</main><nav className="bottom-nav" aria-label="主导航">{items.map(item => <Link key={item.href} href={item.href} className={active === item.href ? "active" : ""}><span className="nav-icon"><Icon name={item.icon} /></span><span>{item.label}</span></Link>)}</nav></div>;
 }

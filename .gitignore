@@ -5,6 +5,7 @@ out
 work
 .DS_Store
 *.log
+*.tsbuildinfo
 .env*
 !.env.example
 
