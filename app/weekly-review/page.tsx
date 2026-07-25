@@ -1,11 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AppShell, EmptyState, Header, SectionTitle } from "../components";
 import { Icon } from "../icons";
 import { AIWeeklyInsight, AIWeeklyInsightInput } from "../lib/ai-weekly-insight";
-import { FOCUS_TAGS, logDurationMinutes, PracticeLog, PracticeTask, taskDurationMinutes, WeeklyReflection } from "../lib/models";
+import { getDataRepository } from "../lib/data-repository";
+import { ClassReview, FOCUS_TAGS, logDurationMinutes, PracticeLog, PracticeTask, taskDurationMinutes, WeeklyReflection } from "../lib/models";
 import {
   addDays,
   buildMonthlyActivity,
@@ -17,14 +18,6 @@ import {
   weekRange,
   yearRange,
 } from "../lib/review-stats";
-import {
-  readClassReviews,
-  readPracticeLogs,
-  readPracticeTasks,
-  readWeeklyReflections,
-  saveWeeklyReflection,
-} from "../lib/storage";
-
 type ReviewMode = "week" | "month" | "year";
 const FOCUS_COLORS = ["#d9f570", "#ff765f", "#79b8e8", "#f7c65a", "#b7a8ff", "#8de0c0"];
 
@@ -93,11 +86,14 @@ export default function WeeklyReviewPage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [monthOffset, setMonthOffset] = useState(0);
   const [yearOffset, setYearOffset] = useState(0);
-  const [classes, setClasses] = useState<ReturnType<typeof readClassReviews>>([]);
+  const [classes, setClasses] = useState<ClassReview[]>([]);
   const [logs, setLogs] = useState<PracticeLog[]>([]);
   const [tasks, setTasks] = useState<PracticeTask[]>([]);
   const [savedReflections, setSavedReflections] = useState<WeeklyReflection[]>([]);
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [reviewError, setReviewError] = useState("");
+  const [savingReflection, setSavingReflection] = useState(false);
   const [insight, setInsight] = useState<AIWeeklyInsight | null>(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState("");
@@ -124,20 +120,36 @@ export default function WeeklyReviewPage() {
     { name:"已消化", count:summary.digestedTasks.length },
   ].filter(item => item.count > 0);
 
+  const loadReviewData = useCallback(async () => {
+    try {
+      const repository = await getDataRepository();
+      const [nextClasses, nextLogs, nextTasks, nextReflections] = await Promise.all([
+        repository.readClassReviews(),
+        repository.readPracticeLogs(),
+        repository.readPracticeTasks(),
+        repository.readWeeklyReflections(),
+      ]);
+      setClasses(nextClasses);
+      setLogs(nextLogs);
+      setTasks(nextTasks);
+      setSavedReflections(nextReflections);
+      setReviewError("");
+    } catch (caught) {
+      setReviewError(caught instanceof Error ? caught.message : "复盘数据读取失败，请稍后重试。");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    const load = () => {
-      setClasses(readClassReviews());
-      setLogs(readPracticeLogs());
-      setTasks(readPracticeTasks());
-      setSavedReflections(readWeeklyReflections());
-    };
+    const load = () => void loadReviewData();
     const timer = window.setTimeout(load, 0);
     window.addEventListener("groovinlog:updated", load);
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener("groovinlog:updated", load);
     };
-  }, []);
+  }, [loadReviewData]);
 
   useEffect(() => {
     if (reviewMode !== "week") return;
@@ -177,8 +189,9 @@ export default function WeeklyReviewPage() {
     }));
   }
 
-  function saveReflection(event: FormEvent) {
+  async function saveReflection(event: FormEvent) {
     event.preventDefault();
+    if (savingReflection) return;
     const reflection: WeeklyReflection = {
       id:savedReflections.find(item => item.weekStart === range.key)?.id ?? crypto.randomUUID(),
       weekStart:range.key,
@@ -188,8 +201,18 @@ export default function WeeklyReviewPage() {
       nextFocusTags:form.nextFocusTags,
       updatedAt:new Date().toISOString(),
     };
-    saveWeeklyReflection(reflection);
-    setSaved(true);
+    setSavingReflection(true);
+    setReviewError("");
+    try {
+      const repository = await getDataRepository();
+      await repository.saveWeeklyReflection(reflection);
+      await loadReviewData();
+      setSaved(true);
+    } catch (caught) {
+      setReviewError(caught instanceof Error ? caught.message : "本周复盘保存失败，请稍后重试。");
+    } finally {
+      setSavingReflection(false);
+    }
   }
 
   function buildWeeklyInsightInput(): AIWeeklyInsightInput {
@@ -288,6 +311,7 @@ export default function WeeklyReviewPage() {
 
   return <AppShell active="/weekly-review"><div className="page weekly-review-page">
     <Header eyebrow={range.label} title={modeTitle(reviewMode, activeOffset)} action={<div className="week-nav"><button type="button" onClick={() => changeRange(-1)} aria-label="上一个时间段">←</button><button type="button" disabled={activeOffset === 0} onClick={() => changeRange(1)} aria-label="下一个时间段">→</button></div>} />
+    {reviewError && <p className="form-error" role="alert">{reviewError}</p>}
 
     <div className="review-mode-toggle" role="group" aria-label="复盘时间维度">
       {(["week", "month", "year"] as ReviewMode[]).map(mode => <button type="button" key={mode} className={reviewMode === mode ? "selected" : ""} onClick={() => setReviewMode(mode)}>{mode === "week" ? "Week" : mode === "month" ? "Month" : "Year"}</button>)}
@@ -302,7 +326,7 @@ export default function WeeklyReviewPage() {
     <div className="review-stats"><div><strong>{summary.classes.length}</strong><span>课程</span></div><div><strong>{summary.logs.length}</strong><span>练习次数</span></div><div><strong>{summary.minutes}</strong><span>分钟</span></div><div><strong>{summary.digestedTasks.length}</strong><span>已消化任务</span></div></div>
     <div className="weekly-conversion"><Icon name="practice" /><div><strong>{reviewMode === "week" ? "本周" : reviewMode === "month" ? "本月" : "全年"}创建了 {summary.tasks.length} 个任务</strong><span>{summary.tasks.length ? `完成率 ${summary.completionRate}%。${summary.unpracticedTasks.length ? `还有 ${summary.unpracticedTasks.length} 个课程任务尚未练习。` : "有记录的任务转化情况不错。"}` : "只统计这段时间真实创建的任务。"}</span></div></div>
 
-    {!hasActivity(summary) && <EmptyState icon="review" title="当前时间范围暂无足够记录" text="课程、练习记录和 Focus 分布会在这里自动汇总。" />}
+    {loading ? <EmptyState icon="review" title="正在加载复盘数据" text="请稍候。" /> : !hasActivity(summary) && <EmptyState icon="review" title="当前时间范围暂无足够记录" text="课程、练习记录和 Focus 分布会在这里自动汇总。" />}
 
     <section><SectionTitle>{modeFocusTitle(reviewMode)}</SectionTitle><FocusPanel summary={summary} /></section>
 
@@ -322,8 +346,8 @@ export default function WeeklyReviewPage() {
       <label><span>02 · 还有什么卡住？ <small>选填</small></span><textarea rows={3} placeholder="只需要看见它，不必评判" value={form.stillStuck} onChange={event => { setSaved(false); setForm(current => ({ ...current, stillStuck:event.target.value })); }} /></label>
       <fieldset><legend>03 · 下周的 Focus <small>选填</small></legend><div className="tag-picker">{FOCUS_TAGS.map(focus => <button type="button" key={focus} className={form.nextFocusTags.includes(focus) ? "selected" : ""} onClick={() => toggleFocus(focus)}>{focus}</button>)}</div></fieldset>
       <label><span>写给下周的一句话 <small>选填</small></span><textarea rows={3} placeholder="下一次开始练习时，你想提醒自己什么？" value={form.nextFocusNote} onChange={event => { setSaved(false); setForm(current => ({ ...current, nextFocusNote:event.target.value })); }} /></label>
-      {saved && <p className="weekly-saved" role="status">✓ 本周复盘已保存到此设备。</p>}
-      <button className="primary-button enabled" type="submit">{reflectionSaved ? "更新本周复盘" : "保存本周复盘"} <Icon name="arrow" /></button>
+      {saved && <p className="weekly-saved" role="status">✓ 本周复盘已保存。</p>}
+      <button className="primary-button enabled" type="submit" disabled={savingReflection}>{savingReflection ? "保存中…" : reflectionSaved ? "更新本周复盘" : "保存本周复盘"} <Icon name="arrow" /></button>
     </form></section>}
   </div></AppShell>;
 }

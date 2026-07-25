@@ -5,8 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { AppShell, EmptyState, Header } from "../../../components";
 import { Icon } from "../../../icons";
+import { getDataRepository } from "../../../lib/data-repository";
 import { localDateKey, PracticeLog, PracticeTask, taskDurationMinutes } from "../../../lib/models";
-import { findPracticeTask, readClassReviews, savePracticeLog } from "../../../lib/storage";
 
 type LoadedTask = PracticeTask & { source: string };
 
@@ -15,47 +15,76 @@ export default function AddPracticeLog() {
   const router = useRouter();
   const [task, setTask] = useState<LoadedTask | null | undefined>(undefined);
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [pendingLogId, setPendingLogId] = useState("");
   const [form, setForm] = useState({
     date:localDateKey(), durationValue:15,
     practiceContent:"", progressScore:3 as 1|2|3|4|5, nextFocus:"",
   });
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const found = findPracticeTask(params.taskId);
-      if (!found) return setTask(null);
-      const review = found.classReviewId ? readClassReviews().find(item => item.id === found.classReviewId) : undefined;
-      setTask({ ...found, source: review ? `${review.teacher} · ${review.danceStyle} · ${review.classTheme}` : "独立练习" });
-      const timerMinutes = Number(new URLSearchParams(window.location.search).get("durationMinutes"));
-      if (Number.isFinite(timerMinutes) && timerMinutes > 0) {
-        setForm(current => ({ ...current, durationValue:Math.ceil(timerMinutes) }));
-      } else {
-        setForm(current => ({ ...current, durationValue:taskDurationMinutes(found) }));
+    let active = true;
+    const load = async () => {
+      try {
+        const repository = await getDataRepository();
+        const found = await repository.findPracticeTask(params.taskId);
+        if (!active) return;
+        if (!found) return setTask(null);
+        const review = found.classReviewId ? await repository.findClassReview(found.classReviewId) : undefined;
+        if (!active) return;
+        setTask({ ...found, source: review ? `${review.teacher} · ${review.danceStyle} · ${review.classTheme}` : "独立练习" });
+        setError("");
+        const timerMinutes = Number(new URLSearchParams(window.location.search).get("durationMinutes"));
+        if (Number.isFinite(timerMinutes) && timerMinutes > 0) {
+          setForm(current => ({ ...current, durationValue:Math.ceil(timerMinutes) }));
+        } else {
+          setForm(current => ({ ...current, durationValue:taskDurationMinutes(found) }));
+        }
+      } catch (caught) {
+        if (!active) return;
+        setTask(null);
+        setError(caught instanceof Error ? caught.message : "练习任务读取失败，请稍后重试。");
       }
-    },0);
-    return () => window.clearTimeout(timer);
+    };
+    const timer = window.setTimeout(() => void load(),0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
   },[params.taskId]);
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!task) return;
+    if (!task || saving) return;
     if (!form.date) return setError("请选择练习日期。");
     if (!Number.isFinite(form.durationValue) || form.durationValue < 1) return setError("练习时长至少为 1 分钟。");
     if (!form.practiceContent.trim()) return setError("请简单记录这次练了什么。");
     if (!form.nextFocus.trim()) return setError("请给下一次练习留一条提示。");
+    const logId = pendingLogId || crypto.randomUUID();
+    setPendingLogId(logId);
     const log: PracticeLog = {
-      id:crypto.randomUUID(), taskId:task.id, classId:task.classReviewId, date:form.date,
+      id:logId, taskId:task.id, classId:task.classReviewId, date:form.date,
       durationUnit:"minutes", durationValue:form.durationValue,
       durationMinutes:form.durationValue,
       songsCount:null,
       practiceContent:form.practiceContent.trim(), progressScore:form.progressScore, nextFocus:form.nextFocus.trim(), createdAt:new Date().toISOString(),
     };
-    savePracticeLog(log);
-    router.push(task.classReviewId ? `/classes/${task.classReviewId}?practiceSaved=1` : "/practice?practiceSaved=1");
+    setSaving(true);
+    setError("");
+    try {
+      const repository = await getDataRepository();
+      await repository.savePracticeLog(log);
+      setPendingLogId("");
+      router.push(task.classReviewId ? `/classes/${task.classReviewId}?practiceSaved=1` : "/practice?practiceSaved=1");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "练习记录保存失败，请稍后重试。若记录已保存但任务状态更新失败，请直接重试。");
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (task === undefined) return <AppShell active="/practice"><div className="page"><EmptyState icon="practice" title="正在加载练习任务" text="请稍候。" /></div></AppShell>;
-  if (task === null) return <AppShell active="/practice"><div className="page"><Header eyebrow="练习记录" title="没有找到任务" /><EmptyState icon="practice" title="此设备上没有这个任务" text="本地任务只保存在创建它的浏览器中。" /><Link href="/practice" className="primary-button enabled">返回练习队列 <Icon name="arrow" /></Link></div></AppShell>;
+  if (task === null) return <AppShell active="/practice"><div className="page"><Header eyebrow="练习记录" title="没有找到任务" /><EmptyState icon="practice" title="没有找到这个任务" text="请回到练习队列确认当前数据空间中是否存在。" /><Link href="/practice" className="primary-button enabled">返回练习队列 <Icon name="arrow" /></Link></div></AppShell>;
 
   const quickValues = [5,10,15,20,30];
   return <AppShell active="/practice"><div className="page practice-log-page">
@@ -70,7 +99,7 @@ export default function AddPracticeLog() {
         <label><span>下次要注意什么？ *</span><textarea rows={3} placeholder="给下一次练习留一条有用的提示" value={form.nextFocus} onChange={e => setForm(current => ({...current,nextFocus:e.target.value}))} /></label>
       </section>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="primary-button enabled" type="submit">保存练习记录 <Icon name="arrow" /></button>
+      <button className="primary-button enabled" type="submit" disabled={saving}>{saving ? "保存中…" : "保存练习记录"} <Icon name="arrow" /></button>
     </form>
   </div></AppShell>;
 }

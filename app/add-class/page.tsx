@@ -4,8 +4,8 @@ import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell, Header } from "../components";
 import { Icon } from "../icons";
+import { getDataRepository } from "../lib/data-repository";
 import { ClassReview, DEFAULT_PRACTICE_DURATION_OPTIONS, FOCUS_TAGS, localDateKey, PracticeTask, VideoReferenceType } from "../lib/models";
-import { readClassReviews, readPreferences, saveClassReview } from "../lib/storage";
 
 type TaskDraft = {
   title: string;
@@ -24,6 +24,7 @@ export default function AddClass() {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2>(1);
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [classInfo, setClassInfo] = useState({
     date: localDateKey(), teacher: "", danceStyle: "", classTheme: "", difficulty: "", customDifficulty: "", classCondition: "" as "" | "Tired" | "Okay" | "Great", whatILearned: "", notDigested: "",
   });
@@ -39,21 +40,37 @@ export default function AddClass() {
   const stepOneValid = useMemo(() => [classInfo.date, classInfo.teacher, classInfo.danceStyle, classInfo.classTheme].every(value => value.trim()), [classInfo]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const reviews = readClassReviews();
-      setSavedTags({
-        teachers: Array.from(new Set(reviews.map(item => item.teacher))).filter(Boolean).slice(0, 10),
-        styles: Array.from(new Set([...reviews.map(item => item.danceStyle), "Hiphop", "House", "Freestyle"])).filter(Boolean).slice(0, 10),
-      });
-      const preferences = readPreferences();
-      setDefaultDuration(preferences.defaultPracticeDurationMinutes);
-      setShowDifficulty(preferences.showDifficulty);
-      setShowBodyStatus(preferences.showBodyStatus);
-      setTasks(current => current.map(task => task.durationValue === 15 ? { ...task, durationValue:preferences.defaultPracticeDurationMinutes } : task));
-    }, 0);
-    return () => window.clearTimeout(timer);
+    let active = true;
+    const load = async () => {
+      try {
+        const repository = await getDataRepository();
+        const [reviews, preferences] = await Promise.all([
+          repository.readClassReviews(),
+          repository.readPreferences(),
+        ]);
+        if (!active) return;
+        setSavedTags({
+          teachers: Array.from(new Set(reviews.map(item => item.teacher))).filter(Boolean).slice(0, 10),
+          styles: Array.from(new Set([...reviews.map(item => item.danceStyle), "Hiphop", "House", "Freestyle"])).filter(Boolean).slice(0, 10),
+        });
+        setDefaultDuration(preferences.defaultPracticeDurationMinutes);
+        setShowDifficulty(preferences.showDifficulty);
+        setShowBodyStatus(preferences.showBodyStatus);
+        setTasks(current => current.map(task => task.durationValue === 15 ? { ...task, durationValue:preferences.defaultPracticeDurationMinutes } : task));
+        setError("");
+      } catch (caught) {
+        if (!active) return;
+        setError(caught instanceof Error ? caught.message : "课程偏好读取失败，请稍后重试。");
+      }
+    };
+    const timer = window.setTimeout(load, 0);
+    window.addEventListener("groovinlog:updated", load);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      window.removeEventListener("groovinlog:updated", load);
+    };
   }, []);
-
   function updateClass(key: keyof typeof classInfo, value: string) {
     setClassInfo(current => ({ ...current, [key]: value }));
   }
@@ -75,8 +92,9 @@ export default function AddClass() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function saveReview(event: FormEvent) {
+  async function saveReview(event: FormEvent) {
     event.preventDefault();
+    if (saving) return;
     const completedTasks = tasks.filter(task => task.title.trim());
     if (!completedTasks.length) return setError("请至少填写一个练习任务标题。");
     const missingFocus = completedTasks.some(task => !task.focusTags.length && !task.customFocus.trim());
@@ -96,8 +114,16 @@ export default function AddClass() {
       whatILearned: classInfo.whatILearned, notDigested: classInfo.notDigested, tasks: savedTasks, createdAt,
       ...(videoValue.trim() ? { videoReference: { type: videoType, value: videoValue.trim() } } : {}),
     };
-    saveClassReview(review);
-    router.push(`/classes/${reviewId}?saved=1`);
+    setSaving(true);
+    setError("");
+    try {
+      const repository = await getDataRepository();
+      await repository.saveClassReview(review);
+      router.push(`/classes/${reviewId}?saved=1`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "课程保存失败，请稍后重试。");
+      setSaving(false);
+    }
   }
 
   function chooseTag(key: "teacher" | "danceStyle", value: string) {
@@ -153,7 +179,7 @@ export default function AddClass() {
       </section>)}
       <button className="secondary-button" type="button" onClick={() => setTasks(current => [...current, emptyTask(defaultDuration)])}><Icon name="plus" /> 再添加一个任务</button>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="primary-button enabled" type="submit">保存课程和任务 <Icon name="arrow" /></button>
+      <button className="primary-button enabled" type="submit" disabled={saving}>{saving ? "保存中…" : "保存课程和任务"} <Icon name="arrow" /></button>
     </form>}
   </div></AppShell>;
 }

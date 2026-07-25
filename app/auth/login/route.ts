@@ -25,17 +25,30 @@ export async function POST(request: NextRequest) {
 
   const next = cleanNext(source.next);
   const emailRedirectTo = new URL(`/auth/callback?next=${encodeURIComponent(next)}`, request.url).toString();
-  const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo,
-      shouldCreateUser: true,
-    },
-  });
+  let error: Error | null;
+
+  try {
+    const supabase = await createClient();
+    const result = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo,
+        shouldCreateUser: true,
+      },
+    });
+    error = result.error;
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : "Magic Link 请求失败，请稍后重试。";
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
 
   if (error) {
-    return NextResponse.json({ error: error.message || "Magic Link 发送失败，请稍后重试。" }, { status: 400 });
+    const authError = error as Error & { code?: string; status?: number };
+    return NextResponse.json({
+      error: error.message || "Magic Link 发送失败，请稍后重试。",
+      code: authError.code || "auth-sign-in-with-otp-failed",
+      status: authError.status || 400,
+    }, { status: 400 });
   }
 
   return NextResponse.json({ ok: true });

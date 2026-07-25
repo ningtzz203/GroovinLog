@@ -5,8 +5,8 @@ import Link from "next/link";
 import { AppShell, EmptyState, Header, SectionTitle } from "./components";
 import { Icon } from "./icons";
 import { AIPracticeRecommendation, AIPracticeRecommendationInput } from "./lib/ai-practice-recommendation";
+import { getDataRepository } from "./lib/data-repository";
 import { ClassReview, localDateKey, logDurationMinutes, PracticeLog, PracticeTask, taskDuration, taskDurationMinutes } from "./lib/models";
-import { readClassReviews, readPracticeLogs, readPracticeTasks } from "./lib/storage";
 
 function currentWeekStart() {
   const date = new Date();
@@ -49,6 +49,7 @@ export default function Dashboard() {
   const [classes, setClasses] = useState<ClassReview[]>([]);
   const [tasks, setTasks] = useState<PracticeTask[]>([]);
   const [logs, setLogs] = useState<PracticeLog[]>([]);
+  const [dashboardError, setDashboardError] = useState("");
   const [aiRecommendation, setAiRecommendation] = useState<AIPracticeRecommendation | null>(null);
   const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [recommendationError, setRecommendationError] = useState("");
@@ -56,15 +57,33 @@ export default function Dashboard() {
   const [recommendationDecision, setRecommendationDecision] = useState<"" | "accepted">("");
 
   useEffect(() => {
-    const load = () => {
-      setClasses(readClassReviews());
-      setTasks(readPracticeTasks());
-      setLogs(readPracticeLogs());
-      setLoaded(true);
+    let active = true;
+    const load = async () => {
+      try {
+        const repository = await getDataRepository();
+        const [nextClasses, nextTasks, nextLogs] = await Promise.all([
+          repository.readClassReviews(),
+          repository.readPracticeTasks(),
+          repository.readPracticeLogs(),
+        ]);
+        if (!active) return;
+        setClasses(nextClasses);
+        setTasks(nextTasks);
+        setLogs(nextLogs);
+        setDashboardError("");
+      } catch (error) {
+        if (!active) return;
+        setDashboardError(error instanceof Error ? error.message : "Dashboard 数据读取失败，请稍后重试。");
+      } finally {
+        if (active) setLoaded(true);
+      }
     };
     load();
     window.addEventListener("groovinlog:updated", load);
-    return () => window.removeEventListener("groovinlog:updated", load);
+    return () => {
+      active = false;
+      window.removeEventListener("groovinlog:updated", load);
+    };
   }, []);
 
   const activeTasks = useMemo(() => tasks.filter(task => !["done", "digested", "completed"].includes(task.status)), [tasks]);
@@ -226,6 +245,8 @@ export default function Dashboard() {
   return <AppShell active="/"><div className="page home-page">
     <Header eyebrow={today} title="今天练什么？" action={<div className="avatar">G</div>} />
 
+    {dashboardError && <p className="form-error" role="alert">{dashboardError}</p>}
+
     <section><SectionTitle link={recommended.length ? "/practice" : undefined}>Next Practice</SectionTitle>{recommended.length > 0 && <div className={`ai-recommendation-bar ${recommendationDecision === "accepted" ? "accepted" : ""}`}><div><Icon name="spark" /><span><strong>{recommendationDecision === "accepted" ? "已采纳这次推荐" : aiRecommendation ? recommendationSource === "ai" ? "AI 已推荐" : "已用本地规则推荐" : "需要一点选择辅助？"}</strong><small>{aiRecommendation?.sessionNote ?? "AI 只会从已有任务里挑，不会创建或修改任务。"}</small></span></div>{aiRecommendation ? <div className="recommendation-feedback"><button type="button" disabled={recommendationLoading || recommendationDecision === "accepted"} onClick={acceptRecommendation}>{recommendationDecision === "accepted" ? "已采纳" : "采纳"}</button><button type="button" disabled={recommendationLoading} onClick={generatePracticeRecommendation}>{recommendationLoading ? "推荐中…" : "重新推荐"}</button><button type="button" disabled={recommendationLoading} onClick={clearRecommendation}>不采纳</button></div> : <button type="button" disabled={recommendationLoading} onClick={generatePracticeRecommendation}>{recommendationLoading ? "推荐中…" : "AI 推荐"}</button>}</div>}{recommendationError && <p className="form-error recommendation-error" role="alert">{recommendationError}</p>}{!loaded ? <EmptyState icon="spark" title="正在加载" text="请稍候。" /> : recommended.length ? <div className="practice-carousel">{displayTasks.slice(0, 6).map(task => {
       const sourceClass = task.classReviewId ? classes.find(item => item.id === task.classReviewId) : undefined;
       const latestLog = logs.filter(log => log.taskId === task.id).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))[0];
@@ -246,6 +267,6 @@ export default function Dashboard() {
 
     <section><SectionTitle>本周主要练了什么</SectionTitle><div className="week-compact-card"><div className="week-compact-stats"><div><strong>{weekClasses.length}</strong><span>课程</span></div><div><strong>{weekLogs.length}</strong><span>练习</span></div><div><strong>{minutes}</strong><span>分钟</span></div></div>{weekFocus.length ? <div className="week-focus-chips">{weekFocus.map(([tag, count]) => <span key={tag}>{tag}<small>{count}</small></span>)}</div> : <p>本周 Focus 会根据练习记录自动汇总。</p>}</div></section>
 
-    <div className="pwa-note home-note"><Icon name="spark" /><p>当前数据保存在本机浏览器中，清除浏览器数据或更换设备可能会丢失记录。<Link href="/settings">偏好设置</Link></p></div>
+    <div className="pwa-note home-note"><Icon name="spark" /><p>登录且完成迁移后会读取云端数据；未登录或未迁移时继续使用本机浏览器数据。<Link href="/settings">偏好设置</Link></p></div>
   </div></AppShell>;
 }

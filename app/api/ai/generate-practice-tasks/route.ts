@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FOCUS_TAGS } from "../../../lib/models";
 import { normalizeAiTaskDrafts, sanitizeAiRequestBody } from "../../../lib/ai-practice";
+import { getAiEndpoint, getAiModel } from "../../../lib/ai-config";
 
 export const runtime = "nodejs";
 
@@ -8,8 +9,6 @@ const MAX_BODY_BYTES = 12_000;
 const TIMEOUT_MS = 18_000;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const RATE_LIMIT_MAX = 12;
-const DEFAULT_AI_BASE_URL = "https://coloful-rose.com/v1";
-const DEFAULT_AI_MODEL = "gpt-5.4";
 
 type RateBucket = { count: number; resetAt: number };
 const rateBuckets = new Map<string, RateBucket>();
@@ -35,11 +34,6 @@ function errorResponse(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
-function aiEndpoint() {
-  const baseUrl = (process.env.AI_BASE_URL ?? DEFAULT_AI_BASE_URL).replace(/\/+$/, "");
-  return `${baseUrl}/responses`;
-}
-
 function extractResponseText(value: unknown) {
   const response = value as { output_text?: unknown; output?: { content?: { text?: unknown }[] }[] };
   if (typeof response.output_text === "string") return response.output_text;
@@ -53,6 +47,8 @@ export async function POST(request: NextRequest) {
 
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) return errorResponse("AI 服务还没有配置 API Key。", 503);
+  const model = getAiModel();
+  if (!model) return errorResponse("AI 服务还没有配置模型。", 503);
 
   let body: unknown;
   try {
@@ -67,7 +63,7 @@ export async function POST(request: NextRequest) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const response = await fetch(aiEndpoint(), {
+    const response = await fetch(getAiEndpoint(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -75,7 +71,7 @@ export async function POST(request: NextRequest) {
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model: process.env.AI_MODEL ?? DEFAULT_AI_MODEL,
+        model,
         input: [
           {
             role: "system",
