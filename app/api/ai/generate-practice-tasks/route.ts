@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FOCUS_TAGS } from "../../../lib/models";
 import { normalizeAiTaskDrafts, sanitizeAiRequestBody } from "../../../lib/ai-practice";
-import { getAiEndpoint, getAiModel } from "../../../lib/ai-config";
+import { AI_REQUEST_TIMEOUT_MS, getAiEndpoint, getAiModel, logAiTiming } from "../../../lib/ai-config";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const MAX_BODY_BYTES = 12_000;
-const TIMEOUT_MS = 18_000;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const RATE_LIMIT_MAX = 12;
 
@@ -61,8 +61,11 @@ export async function POST(request: NextRequest) {
   if (!data) return errorResponse(error ?? "请求内容无效。");
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const startedAt = Date.now();
+  const startTimestamp = new Date(startedAt).toISOString();
+  const timeout = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
   try {
+    const roseStartedAt = Date.now();
     const response = await fetch(getAiEndpoint(), {
       method: "POST",
       headers: {
@@ -133,6 +136,17 @@ export async function POST(request: NextRequest) {
         },
       }),
     });
+    const roseElapsedMs = Date.now() - roseStartedAt;
+    const totalElapsedMs = Date.now() - startedAt;
+    logAiTiming({
+      route:"generate-practice-tasks",
+      model,
+      startTimestamp,
+      roseElapsedMs,
+      httpStatus:response.status,
+      totalElapsedMs,
+      outcome:response.ok ? "success" : "upstream-error",
+    });
 
     const payload = await response.json();
     if (!response.ok) return errorResponse(payload?.error?.message ?? "AI 生成失败，请稍后重试。", response.status);
@@ -151,6 +165,14 @@ export async function POST(request: NextRequest) {
     if (!tasks.length) return errorResponse("AI 没有生成可用任务，请重试或手动创建。", 502);
     return NextResponse.json({ tasks });
   } catch (err) {
+    logAiTiming({
+      route:"generate-practice-tasks",
+      model,
+      startTimestamp,
+      httpStatus:null,
+      totalElapsedMs:Date.now() - startedAt,
+      outcome:err instanceof Error && err.name === "AbortError" ? "timeout" : "error",
+    });
     if (err instanceof Error && err.name === "AbortError") return errorResponse("AI 生成超时，请稍后重试。", 504);
     return errorResponse("AI 生成失败，请检查网络或稍后重试。", 502);
   } finally {
