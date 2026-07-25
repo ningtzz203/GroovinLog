@@ -6,6 +6,14 @@ const PRACTICE_LOGS_KEY = "groovinlog.practice-logs.v1";
 const WEEKLY_REFLECTIONS_KEY = "groovinlog.weekly-reflections.v1";
 const PREFERENCES_KEY = "groovinlog.preferences.v1";
 
+const PRODUCT_STORAGE_KEYS = [
+  STORAGE_KEY,
+  STANDALONE_TASKS_KEY,
+  PRACTICE_LOGS_KEY,
+  WEEKLY_REFLECTIONS_KEY,
+  PREFERENCES_KEY,
+] as const;
+
 export const DEFAULT_PREFERENCES: AppPreferences = {
   defaultPracticeDurationMinutes: 20,
   practiceQueueSortOrder: "newest",
@@ -54,6 +62,26 @@ export function readClassReviews(): ClassReview[] {
 export function saveClassReview(review: ClassReview) {
   const existing = readClassReviews().filter(item => item.id !== review.id);
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify([review, ...existing]));
+  window.dispatchEvent(new Event("groovinlog:updated"));
+}
+
+export function updateClassReview(reviewId: string, patch: Partial<Omit<ClassReview, "id" | "tasks" | "createdAt">>) {
+  const reviews = readClassReviews();
+  const nextReviews = reviews.map(review => review.id === reviewId ? { ...review, ...patch } : review);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextReviews));
+  window.dispatchEvent(new Event("groovinlog:updated"));
+}
+
+export function deleteClassReview(reviewId: string) {
+  const reviews = readClassReviews();
+  const standalone = readStandaloneTasks();
+  const deletedReview = reviews.find(review => review.id === reviewId);
+  const detachedTasks = deletedReview?.tasks.map(task => ({ ...task, classReviewId:null })) ?? [];
+  const nextReviews = reviews.filter(review => review.id !== reviewId);
+  const nextLogs = readPracticeLogs().map(log => log.classId === reviewId ? { ...log, classId:null } : log);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextReviews));
+  window.localStorage.setItem(STANDALONE_TASKS_KEY, JSON.stringify([...detachedTasks, ...standalone]));
+  window.localStorage.setItem(PRACTICE_LOGS_KEY, JSON.stringify(nextLogs));
   window.dispatchEvent(new Event("groovinlog:updated"));
 }
 
@@ -115,6 +143,19 @@ export function updatePracticeTask(taskId: string, patch: Partial<PracticeTask>)
   }
 }
 
+export function deletePracticeTask(taskId: string) {
+  const standalone = readStandaloneTasks().filter(task => task.id !== taskId);
+  const reviews = readClassReviews().map(review => ({
+    ...review,
+    tasks:review.tasks.filter(task => task.id !== taskId),
+  }));
+  const logs = readPracticeLogs().filter(log => log.taskId !== taskId);
+  window.localStorage.setItem(STANDALONE_TASKS_KEY, JSON.stringify(standalone));
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(reviews));
+  window.localStorage.setItem(PRACTICE_LOGS_KEY, JSON.stringify(logs));
+  window.dispatchEvent(new Event("groovinlog:updated"));
+}
+
 export function readPracticeLogs(): PracticeLog[] {
   if (typeof window === "undefined") return [];
   try {
@@ -132,6 +173,18 @@ export function savePracticeLog(log: PracticeLog) {
   window.dispatchEvent(new Event("groovinlog:updated"));
 }
 
+export function updatePracticeLog(logId: string, patch: Partial<Omit<PracticeLog, "id" | "taskId" | "classId" | "createdAt">>) {
+  const logs = readPracticeLogs().map(log => log.id === logId ? { ...log, ...patch } : log);
+  window.localStorage.setItem(PRACTICE_LOGS_KEY, JSON.stringify(logs));
+  window.dispatchEvent(new Event("groovinlog:updated"));
+}
+
+export function deletePracticeLog(logId: string) {
+  const logs = readPracticeLogs().filter(log => log.id !== logId);
+  window.localStorage.setItem(PRACTICE_LOGS_KEY, JSON.stringify(logs));
+  window.dispatchEvent(new Event("groovinlog:updated"));
+}
+
 export function readWeeklyReflections(): WeeklyReflection[] {
   if (typeof window === "undefined") return [];
   try {
@@ -145,5 +198,17 @@ export function readWeeklyReflections(): WeeklyReflection[] {
 export function saveWeeklyReflection(reflection: WeeklyReflection) {
   const existing = readWeeklyReflections().filter(item => item.weekStart !== reflection.weekStart);
   window.localStorage.setItem(WEEKLY_REFLECTIONS_KEY, JSON.stringify([reflection, ...existing]));
+  window.dispatchEvent(new Event("groovinlog:updated"));
+}
+
+export function deleteWeeklyReflection(reflectionId: string) {
+  const reflections = readWeeklyReflections().filter(item => item.id !== reflectionId);
+  window.localStorage.setItem(WEEKLY_REFLECTIONS_KEY, JSON.stringify(reflections));
+  window.dispatchEvent(new Event("groovinlog:updated"));
+}
+
+export function clearAllUserData() {
+  if (typeof window === "undefined") return;
+  PRODUCT_STORAGE_KEYS.forEach(key => window.localStorage.removeItem(key));
   window.dispatchEvent(new Event("groovinlog:updated"));
 }

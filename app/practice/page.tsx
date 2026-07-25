@@ -69,6 +69,8 @@ export default function Practice() {
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   const [focusFilter, setFocusFilter] = useState("all");
   const [editingTaskId, setEditingTaskId] = useState("");
+  const [confirmingTaskDeleteId, setConfirmingTaskDeleteId] = useState("");
+  const [confirmingLogDeleteId, setConfirmingLogDeleteId] = useState("");
   const [editDraft, setEditDraft] = useState<EditTaskDraft>({ title:"", keyPoints:"", focusTags:[], customFocus:"", isHighPriority:false, durationValue:15 });
   const [draft, setDraft] = useState({ title:"", keyPoints:"", focusTags:[] as string[], customFocus:"", isHighPriority:false, durationValue:15 });
 
@@ -99,9 +101,10 @@ export default function Practice() {
   useEffect(() => {
     const load = () => void loadPracticeData();
     load();
-    const feedbackTimer = window.setTimeout(() => {
-      if (new URLSearchParams(window.location.search).get("practiceSaved") === "1") setSaveMessage("练习记录已保存。");
-    }, 0);
+	    const feedbackTimer = window.setTimeout(() => {
+	      if (new URLSearchParams(window.location.search).get("practiceSaved") === "1") setSaveMessage("练习记录已保存。");
+	      if (new URLSearchParams(window.location.search).get("practiceDeleted") === "1") setSaveMessage("练习记录已删除。");
+	    }, 0);
     window.addEventListener("groovinlog:updated", load);
     return () => {
       window.clearTimeout(feedbackTimer);
@@ -236,7 +239,7 @@ export default function Practice() {
     setEditDraft(current => ({ ...current, focusTags: current.focusTags.includes(focus) ? current.focusTags.filter(item => item !== focus) : [...current.focusTags, focus] }));
   }
 
-  async function saveEditedTask() {
+	  async function saveEditedTask() {
     if (!editingTaskId) return;
     if (actionPending) return;
     const focusTags = [...editDraft.focusTags, ...(editDraft.customFocus.trim() ? [editDraft.customFocus.trim()] : [])];
@@ -261,6 +264,41 @@ export default function Practice() {
       setSaveMessage("练习任务已更新。");
     } catch (caught) {
       setTaskError(caught instanceof Error ? caught.message : "练习任务保存失败，请稍后重试。");
+    } finally {
+      setActionPending("");
+    }
+  }
+
+  async function deleteTask(taskId: string) {
+    if (actionPending) return;
+    setActionPending(`delete:${taskId}`);
+    setTaskError("");
+    try {
+      const repository = await getDataRepository();
+      await repository.deletePracticeTask(taskId);
+      await loadPracticeData();
+      setConfirmingTaskDeleteId("");
+      setEditingTaskId("");
+      setSaveMessage("练习任务已删除，相关练习记录也已删除。");
+    } catch (caught) {
+      setTaskError(caught instanceof Error ? caught.message : "练习任务删除失败，请稍后重试。");
+    } finally {
+      setActionPending("");
+    }
+  }
+
+  async function deleteLog(logId: string) {
+    if (actionPending) return;
+    setActionPending(`delete-log:${logId}`);
+    setTaskError("");
+    try {
+      const repository = await getDataRepository();
+      await repository.deletePracticeLog(logId);
+      await loadPracticeData();
+      setConfirmingLogDeleteId("");
+      setSaveMessage("练习记录已删除。");
+    } catch (caught) {
+      setTaskError(caught instanceof Error ? caught.message : "练习记录删除失败，请稍后重试。");
     } finally {
       setActionPending("");
     }
@@ -319,7 +357,7 @@ export default function Practice() {
         const totalMinutes = taskLogs.reduce((sum,log) => sum + logDurationMinutes(log),0);
         const latest = taskLogs[0];
         const statusLabel = task.status === "practicing" ? "练习中" : ["done","digested","completed"].includes(task.status) ? "已消化" : task.isHighPriority ? "高优先级" : task.classReviewId === null ? "独立任务" : "进行中";
-        return <article className="practice-card" key={task.id}>{editingTaskId === task.id ? <div className="practice-edit-form real-form"><div className="task-editor-head"><strong>编辑练习任务</strong><button type="button" disabled={Boolean(actionPending)} onClick={() => setEditingTaskId("")}>取消</button></div><label><span>任务标题 *</span><input value={editDraft.title} onChange={event => setEditDraft(current => ({ ...current, title:event.target.value }))} /></label><label><span>任务要点 <small>选填</small></span><textarea rows={2} value={editDraft.keyPoints} onChange={event => setEditDraft(current => ({ ...current, keyPoints:event.target.value }))} /></label><fieldset><legend>Focus *</legend><div className="tag-picker compact edit-focus-picker">{FOCUS_TAGS.map(focus => <button type="button" className={editDraft.focusTags.includes(focus) ? "selected" : ""} key={focus} onClick={() => toggleEditFocus(focus)}>{focus}</button>)}</div>{editDraft.focusTags.some(tag => !FOCUS_TAGS.includes(tag as typeof FOCUS_TAGS[number])) && <div className="tag-picker compact custom-focus-review">{editDraft.focusTags.filter(tag => !FOCUS_TAGS.includes(tag as typeof FOCUS_TAGS[number])).map(tag => <button type="button" className="selected" key={tag} onClick={() => toggleEditFocus(tag)}>{tag}</button>)}</div>}</fieldset><label><span>自定义 Focus</span><input placeholder="添加自定义标签" value={editDraft.customFocus} onChange={event => setEditDraft(current => ({ ...current, customFocus:event.target.value }))} /></label><div className="duration-editor no-border"><span>练习时长</span><div className="quick-duration task-duration-picks">{DEFAULT_PRACTICE_DURATION_OPTIONS.map(value => <button type="button" className={editDraft.durationValue === value ? "selected" : ""} key={value} onClick={() => setEditDraft(current => ({ ...current, durationValue:value }))}>{value} 分钟</button>)}</div><label><span>自定义分钟数</span><input type="number" min="1" value={editDraft.durationValue} onChange={event => setEditDraft(current => ({ ...current, durationValue:Math.max(1, Number(event.target.value)) }))} /></label></div><label className="switch-row"><input type="checkbox" checked={editDraft.isHighPriority} onChange={event => setEditDraft(current => ({ ...current, isHighPriority:event.target.checked }))} /><span><strong>高优先级</strong><small>让这个任务更靠前显示</small></span></label>{taskError && <p className="form-error" role="alert">{taskError}</p>}<button type="button" className="primary-button enabled" disabled={Boolean(actionPending)} onClick={() => void saveEditedTask()}>{actionPending === `edit:${task.id}` ? "保存中…" : "保存修改"} <Icon name="arrow" /></button></div> : <><div className="task-top"><span className={`priority-label ${task.isHighPriority ? "" : "medium"}`}>{statusLabel}</span><span><Icon name="clock" size={17} /> {taskDuration(task)}</span></div><h2>{task.title}</h2><p className="source">{task.source}</p><div className="focus-row">{task.focusTags.map(tag => <span key={tag}>{tag}</span>)}</div>{latest && <div className="practice-stats"><div><small>最近练习</small><strong>{latest.date}</strong></div><div><small>累计时长</small><strong>{totalMinutes} 分钟</strong></div></div>}{latest?.nextFocus && <div className="next-note"><small>下次注意</small><p>{latest.nextFocus}</p></div>}{!latest && task.keyPoints && <div className="next-note"><small>任务要点</small><p>{task.keyPoints}</p></div>}<div className="practice-actions"><button type="button" onClick={() => startTimer(task)}><Icon name="clock" size={17} /> 开始倒计时</button><Link className="log-practice-button" href={`/practice/${task.id}/log`}><Icon name="plus" size={17} /> 记录练习</Link></div><div className="task-card-footer">{task.classReviewId ? <Link href={`/classes/${task.classReviewId}`}>查看来源课程</Link> : <span>独立任务</span>}<div><button type="button" disabled={Boolean(actionPending)} onClick={() => startEditTask(task)}>编辑</button>{!["done","digested","completed"].includes(task.status) && <button type="button" disabled={Boolean(actionPending)} onClick={() => void changeStatus(task.id,"digested")}>标记已消化</button>}{["done","digested","completed"].includes(task.status) && <button type="button" disabled={Boolean(actionPending)} onClick={() => void changeStatus(task.id,"practicing")}>恢复到进行中</button>}</div></div></>}</article>;
+        return <article className="practice-card" key={task.id}>{editingTaskId === task.id ? <div className="practice-edit-form real-form"><div className="task-editor-head"><strong>编辑练习任务</strong><button type="button" disabled={Boolean(actionPending)} onClick={() => setEditingTaskId("")}>取消</button></div><label><span>任务标题 *</span><input value={editDraft.title} onChange={event => setEditDraft(current => ({ ...current, title:event.target.value }))} /></label><label><span>任务要点 <small>选填</small></span><textarea rows={2} value={editDraft.keyPoints} onChange={event => setEditDraft(current => ({ ...current, keyPoints:event.target.value }))} /></label><fieldset><legend>Focus *</legend><div className="tag-picker compact edit-focus-picker">{FOCUS_TAGS.map(focus => <button type="button" className={editDraft.focusTags.includes(focus) ? "selected" : ""} key={focus} onClick={() => toggleEditFocus(focus)}>{focus}</button>)}</div>{editDraft.focusTags.some(tag => !FOCUS_TAGS.includes(tag as typeof FOCUS_TAGS[number])) && <div className="tag-picker compact custom-focus-review">{editDraft.focusTags.filter(tag => !FOCUS_TAGS.includes(tag as typeof FOCUS_TAGS[number])).map(tag => <button type="button" className="selected" key={tag} onClick={() => toggleEditFocus(tag)}>{tag}</button>)}</div>}</fieldset><label><span>自定义 Focus</span><input placeholder="添加自定义标签" value={editDraft.customFocus} onChange={event => setEditDraft(current => ({ ...current, customFocus:event.target.value }))} /></label><div className="duration-editor no-border"><span>练习时长</span><div className="quick-duration task-duration-picks">{DEFAULT_PRACTICE_DURATION_OPTIONS.map(value => <button type="button" className={editDraft.durationValue === value ? "selected" : ""} key={value} onClick={() => setEditDraft(current => ({ ...current, durationValue:value }))}>{value} 分钟</button>)}</div><label><span>自定义分钟数</span><input type="number" min="1" value={editDraft.durationValue} onChange={event => setEditDraft(current => ({ ...current, durationValue:Math.max(1, Number(event.target.value)) }))} /></label></div><label className="switch-row"><input type="checkbox" checked={editDraft.isHighPriority} onChange={event => setEditDraft(current => ({ ...current, isHighPriority:event.target.checked }))} /><span><strong>高优先级</strong><small>让这个任务更靠前显示</small></span></label>{taskError && <p className="form-error" role="alert">{taskError}</p>}<button type="button" className="primary-button enabled" disabled={Boolean(actionPending)} onClick={() => void saveEditedTask()}>{actionPending === `edit:${task.id}` ? "保存中…" : "保存修改"} <Icon name="arrow" /></button><div className="danger-inline"><p>删除任务会同时永久删除相关练习记录。</p>{confirmingTaskDeleteId === task.id ? <><button type="button" disabled={Boolean(actionPending)} onClick={() => setConfirmingTaskDeleteId("")}>取消</button><button type="button" className="danger-button" disabled={Boolean(actionPending)} onClick={() => void deleteTask(task.id)}>{actionPending === `delete:${task.id}` ? "删除中…" : "确认删除"}</button></> : <button type="button" className="danger-button" disabled={Boolean(actionPending)} onClick={() => setConfirmingTaskDeleteId(task.id)}>删除任务</button>}</div></div> : <><div className="task-top"><span className={`priority-label ${task.isHighPriority ? "" : "medium"}`}>{statusLabel}</span><span><Icon name="clock" size={17} /> {taskDuration(task)}</span></div><h2>{task.title}</h2><p className="source">{task.source}</p><div className="focus-row">{task.focusTags.map(tag => <span key={tag}>{tag}</span>)}</div>{latest && <div className="practice-stats"><div><small>最近练习</small><strong>{latest.date}</strong></div><div><small>累计时长</small><strong>{totalMinutes} 分钟</strong></div></div>}{latest?.nextFocus && <div className="next-note"><small>下次注意</small><p>{latest.nextFocus}</p></div>}{!latest && task.keyPoints && <div className="next-note"><small>任务要点</small><p>{task.keyPoints}</p></div>}{taskLogs.length > 0 && <div className="practice-log-list">{taskLogs.map(log => <div key={log.id}><span>{log.date} · {logDurationMinutes(log)} 分钟</span><p>{log.practiceContent}</p><div><Link href={`/practice/${task.id}/log?logId=${log.id}`}>编辑记录</Link>{confirmingLogDeleteId === log.id ? <><button type="button" disabled={Boolean(actionPending)} onClick={() => setConfirmingLogDeleteId("")}>取消</button><button type="button" className="danger-link" disabled={Boolean(actionPending)} onClick={() => void deleteLog(log.id)}>{actionPending === `delete-log:${log.id}` ? "删除中…" : "确认删除"}</button></> : <button type="button" className="danger-link" disabled={Boolean(actionPending)} onClick={() => setConfirmingLogDeleteId(log.id)}>删除记录</button>}</div></div>)}</div>}<div className="practice-actions"><button type="button" onClick={() => startTimer(task)}><Icon name="clock" size={17} /> 开始倒计时</button><Link className="log-practice-button" href={`/practice/${task.id}/log`}><Icon name="plus" size={17} /> 记录练习</Link></div><div className="task-card-footer">{task.classReviewId ? <Link href={`/classes/${task.classReviewId}`}>查看来源课程</Link> : <span>独立任务</span>}<div><button type="button" disabled={Boolean(actionPending)} onClick={() => startEditTask(task)}>编辑</button>{!["done","digested","completed"].includes(task.status) && <button type="button" disabled={Boolean(actionPending)} onClick={() => void changeStatus(task.id,"digested")}>标记已消化</button>}{["done","digested","completed"].includes(task.status) && <button type="button" disabled={Boolean(actionPending)} onClick={() => void changeStatus(task.id,"practicing")}>恢复到进行中</button>}{confirmingTaskDeleteId === task.id ? <><button type="button" disabled={Boolean(actionPending)} onClick={() => setConfirmingTaskDeleteId("")}>取消</button><button type="button" className="danger-link" disabled={Boolean(actionPending)} onClick={() => void deleteTask(task.id)}>{actionPending === `delete:${task.id}` ? "删除中…" : "确认删除"}</button></> : <button type="button" className="danger-link" disabled={Boolean(actionPending)} onClick={() => setConfirmingTaskDeleteId(task.id)}>删除</button>}</div></div></>}</article>;
       })}
       {savedTasks.length > 0 && sortedTasks.length === 0 && <EmptyState icon="practice" title="这个分类里还没有任务" text={focusFilter === "all" ? "可以切换其他分类，或从课程复盘创建新任务。" : "可以换一个 Focus，或查看全部 Focus。"} />}
     </div></section>

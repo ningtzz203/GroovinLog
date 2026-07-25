@@ -94,6 +94,8 @@ export default function WeeklyReviewPage() {
   const [loading, setLoading] = useState(true);
   const [reviewError, setReviewError] = useState("");
   const [savingReflection, setSavingReflection] = useState(false);
+  const [deletingReflection, setDeletingReflection] = useState(false);
+  const [confirmingReflectionDelete, setConfirmingReflectionDelete] = useState(false);
   const [insight, setInsight] = useState<AIWeeklyInsight | null>(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState("");
@@ -162,6 +164,7 @@ export default function WeeklyReviewPage() {
         nextFocusTags:reflection.nextFocusTags,
       } : { improved:"", stillStuck:"", nextFocusNote:"", nextFocusTags:[] });
       setSaved(false);
+      setConfirmingReflectionDelete(false);
     }, 0);
     return () => window.clearTimeout(timer);
   }, [range.key, reviewMode, savedReflections]);
@@ -212,6 +215,25 @@ export default function WeeklyReviewPage() {
       setReviewError(caught instanceof Error ? caught.message : "本周复盘保存失败，请稍后重试。");
     } finally {
       setSavingReflection(false);
+    }
+  }
+
+  async function deleteCurrentReflection() {
+    const reflection = savedReflections.find(item => item.weekStart === range.key);
+    if (!reflection || deletingReflection || savingReflection) return;
+    setDeletingReflection(true);
+    setReviewError("");
+    try {
+      const repository = await getDataRepository();
+      await repository.deleteWeeklyReflection(reflection.id);
+      await loadReviewData();
+      setForm({ improved:"", stillStuck:"", nextFocusNote:"", nextFocusTags:[] });
+      setSaved(false);
+      setConfirmingReflectionDelete(false);
+    } catch (caught) {
+      setReviewError(caught instanceof Error ? caught.message : "本周复盘删除失败，请稍后重试。");
+    } finally {
+      setDeletingReflection(false);
     }
   }
 
@@ -347,7 +369,8 @@ export default function WeeklyReviewPage() {
       <fieldset><legend>03 · 下周的 Focus <small>选填</small></legend><div className="tag-picker">{FOCUS_TAGS.map(focus => <button type="button" key={focus} className={form.nextFocusTags.includes(focus) ? "selected" : ""} onClick={() => toggleFocus(focus)}>{focus}</button>)}</div></fieldset>
       <label><span>写给下周的一句话 <small>选填</small></span><textarea rows={3} placeholder="下一次开始练习时，你想提醒自己什么？" value={form.nextFocusNote} onChange={event => { setSaved(false); setForm(current => ({ ...current, nextFocusNote:event.target.value })); }} /></label>
       {saved && <p className="weekly-saved" role="status">✓ 本周复盘已保存。</p>}
-      <button className="primary-button enabled" type="submit" disabled={savingReflection}>{savingReflection ? "保存中…" : reflectionSaved ? "更新本周复盘" : "保存本周复盘"} <Icon name="arrow" /></button>
+      <button className="primary-button enabled" type="submit" disabled={savingReflection || deletingReflection}>{savingReflection ? "保存中…" : reflectionSaved ? "更新本周复盘" : "保存本周复盘"} <Icon name="arrow" /></button>
+      {reflectionSaved && <div className="danger-inline"><p>删除这条本周复盘？此操作不能撤销。</p>{confirmingReflectionDelete ? <><button type="button" disabled={savingReflection || deletingReflection} onClick={() => setConfirmingReflectionDelete(false)}>取消</button><button type="button" className="danger-button" disabled={savingReflection || deletingReflection} onClick={() => void deleteCurrentReflection()}>{deletingReflection ? "删除中…" : "确认删除"}</button></> : <button type="button" className="danger-link" disabled={savingReflection || deletingReflection} onClick={() => setConfirmingReflectionDelete(true)}>删除本周复盘</button>}</div>}
     </form></section>}
   </div></AppShell>;
 }

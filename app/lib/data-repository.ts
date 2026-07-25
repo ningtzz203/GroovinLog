@@ -2,7 +2,12 @@
 
 import type { AppPreferences, ClassReview, PracticeLog, PracticeTask, WeeklyReflection } from "./models";
 import {
+  clearAllUserData,
   appendPracticeTasksToClassReview,
+  deleteClassReview,
+  deletePracticeLog,
+  deletePracticeTask,
+  deleteWeeklyReflection,
   findPracticeTask,
   readClassReviews,
   readPracticeLogs,
@@ -15,10 +20,17 @@ import {
   savePreferences,
   saveStandaloneTask,
   saveWeeklyReflection,
+  updateClassReview,
+  updatePracticeLog,
   updatePracticeTask,
 } from "./storage";
 import {
   appendPracticeTasksToClassReviewCloud,
+  clearAllUserDataCloud,
+  deleteClassReviewCloud,
+  deletePracticeLogCloud,
+  deletePracticeTaskCloud,
+  deleteWeeklyReflectionCloud,
   findClassReviewCloud,
   findPracticeTaskCloud,
   readClassReviewsCloud,
@@ -32,6 +44,8 @@ import {
   savePreferencesCloud,
   saveStandaloneTaskCloud,
   saveWeeklyReflectionCloud,
+  updateClassReviewCloud,
+  updatePracticeLogCloud,
   updatePracticeTaskCloud,
   type CloudMigrationEligibility,
 } from "./supabase/cloud-storage";
@@ -64,12 +78,19 @@ export type GroovinLogDataRepository = {
   findClassReview: (id: string) => Promise<ClassReview | undefined>;
   findPracticeTask: (id: string) => Promise<PracticeTask | undefined>;
   saveClassReview: (review: ClassReview) => Promise<void>;
+  updateClassReview: (reviewId: string, patch: Partial<Omit<ClassReview, "id" | "tasks" | "createdAt">>) => Promise<void>;
+  deleteClassReview: (reviewId: string) => Promise<void>;
   saveStandaloneTask: (task: PracticeTask) => Promise<void>;
   appendPracticeTasksToClassReview: (reviewId: string, tasks: PracticeTask[]) => Promise<ClassReview | undefined>;
   updatePracticeTask: (taskId: string, patch: Partial<PracticeTask>) => Promise<void>;
+  deletePracticeTask: (taskId: string) => Promise<void>;
   savePracticeLog: (log: PracticeLog) => Promise<void>;
+  updatePracticeLog: (logId: string, patch: Partial<Omit<PracticeLog, "id" | "taskId" | "classId" | "createdAt">>) => Promise<void>;
+  deletePracticeLog: (logId: string) => Promise<void>;
   saveWeeklyReflection: (reflection: WeeklyReflection) => Promise<void>;
+  deleteWeeklyReflection: (reflectionId: string) => Promise<void>;
   savePreferences: (preferences: Partial<AppPreferences>) => Promise<AppPreferences>;
+  clearAllUserData: () => Promise<void>;
 };
 
 function localClassReviewById(id: string) {
@@ -89,12 +110,19 @@ function createLocalRepository(resolution: DataBackendResolution): GroovinLogDat
     findClassReview:async id => localClassReviewById(id),
     findPracticeTask:async id => findPracticeTask(id),
     saveClassReview:async review => saveClassReview(review),
+    updateClassReview:async (reviewId, patch) => updateClassReview(reviewId, patch),
+    deleteClassReview:async reviewId => deleteClassReview(reviewId),
     saveStandaloneTask:async task => saveStandaloneTask(task),
     appendPracticeTasksToClassReview:async (reviewId, tasks) => appendPracticeTasksToClassReview(reviewId, tasks),
     updatePracticeTask:async (taskId, patch) => updatePracticeTask(taskId, patch),
+    deletePracticeTask:async taskId => deletePracticeTask(taskId),
     savePracticeLog:async log => savePracticeLog(log),
+    updatePracticeLog:async (logId, patch) => updatePracticeLog(logId, patch),
+    deletePracticeLog:async logId => deletePracticeLog(logId),
     saveWeeklyReflection:async reflection => saveWeeklyReflection(reflection),
+    deleteWeeklyReflection:async reflectionId => deleteWeeklyReflection(reflectionId),
     savePreferences:async preferences => savePreferences(preferences),
+    clearAllUserData:async () => clearAllUserData(),
   };
 }
 
@@ -111,12 +139,19 @@ function createCloudRepository(resolution: DataBackendResolution): GroovinLogDat
     findClassReview:findClassReviewCloud,
     findPracticeTask:findPracticeTaskCloud,
     saveClassReview:saveClassReviewCloud,
+    updateClassReview:updateClassReviewCloud,
+    deleteClassReview:deleteClassReviewCloud,
     saveStandaloneTask:saveStandaloneTaskCloud,
     appendPracticeTasksToClassReview:appendPracticeTasksToClassReviewCloud,
     updatePracticeTask:updatePracticeTaskCloud,
+    deletePracticeTask:deletePracticeTaskCloud,
     savePracticeLog:savePracticeLogCloud,
+    updatePracticeLog:updatePracticeLogCloud,
+    deletePracticeLog:deletePracticeLogCloud,
     saveWeeklyReflection:saveWeeklyReflectionCloud,
+    deleteWeeklyReflection:deleteWeeklyReflectionCloud,
     savePreferences:savePreferencesCloud,
+    clearAllUserData:clearAllUserDataCloud,
   };
 }
 

@@ -10,6 +10,14 @@ import { createClient } from "../lib/supabase/client";
 
 const SETTINGS_DURATION_OPTIONS = [10, 15, 20, 30] as const;
 type AccountUser = { id: string; email?: string | null };
+type ClearDataPreview = {
+  backend: "cloud" | "local";
+  classReviews: number;
+  practiceTasks: number;
+  practiceLogs: number;
+  weeklyReflections: number;
+  preferences: "yes";
+};
 
 export default function Settings() {
   const [preferences, setPreferences] = useState<AppPreferences>(DEFAULT_PREFERENCES);
@@ -23,6 +31,11 @@ export default function Settings() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordError, setPasswordError] = useState("");
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [clearConfirmText, setClearConfirmText] = useState("");
+  const [clearPreview, setClearPreview] = useState<ClearDataPreview | null>(null);
+  const [clearLoading, setClearLoading] = useState(false);
+  const [clearError, setClearError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -117,6 +130,73 @@ export default function Settings() {
     }
   }
 
+  async function openClearConfirmation() {
+    if (clearLoading) return;
+    setClearLoading(true);
+    setClearError("");
+    setSaved("");
+    setClearConfirmText("");
+    try {
+      const repository = await getDataRepository();
+      const [classReviews, practiceTasks, practiceLogs, weeklyReflections] = await Promise.all([
+        repository.readClassReviews(),
+        repository.readPracticeTasks(),
+        repository.readPracticeLogs(),
+        repository.readWeeklyReflections(),
+        repository.readPreferences(),
+      ]);
+      setClearPreview({
+        backend:repository.backend,
+        classReviews:classReviews.length,
+        practiceTasks:practiceTasks.length,
+        practiceLogs:practiceLogs.length,
+        weeklyReflections:weeklyReflections.length,
+        preferences:"yes",
+      });
+      setClearConfirmOpen(true);
+    } catch (caught) {
+      setClearError(caught instanceof Error ? caught.message : "清空前的数据读取失败，请稍后重试。");
+    } finally {
+      setClearLoading(false);
+    }
+  }
+
+  function cancelClearConfirmation() {
+    if (clearLoading) return;
+    setClearConfirmOpen(false);
+    setClearConfirmText("");
+    setClearPreview(null);
+    setClearError("");
+  }
+
+  async function clearAllData() {
+    if (clearLoading || clearConfirmText !== "DELETE") return;
+    setClearLoading(true);
+    setClearError("");
+    setSaved("");
+    try {
+      const repository = await getDataRepository();
+      await repository.clearAllUserData();
+      const nextPreferences = await repository.readPreferences();
+      setPreferences(nextPreferences);
+      setClearPreview({
+        backend:repository.backend,
+        classReviews:0,
+        practiceTasks:0,
+        practiceLogs:0,
+        weeklyReflections:0,
+        preferences:"yes",
+      });
+      setClearConfirmOpen(false);
+      setClearConfirmText("");
+      setSaved("All GroovinLog data has been deleted.");
+    } catch (caught) {
+      setClearError(caught instanceof Error ? caught.message : "清空数据失败，请稍后重试。");
+    } finally {
+      setClearLoading(false);
+    }
+  }
+
   return <AppShell active="/settings"><div className="page settings-page">
     <Header eyebrow="偏好设置" title="让记录更省力。" action={<Link className="round-button" href="/" aria-label="返回首页">←</Link>} />
 
@@ -160,6 +240,26 @@ export default function Settings() {
         <button type="button" disabled={preferencesLoading || preferencesSaving} className={preferences.practiceQueueSortOrder === "newest" ? "selected" : ""} onClick={() => void updatePreferences({ practiceQueueSortOrder:"newest" }, "默认排序已设为最新优先。")}>最新优先</button>
         <button type="button" disabled={preferencesLoading || preferencesSaving} className={preferences.practiceQueueSortOrder === "oldest" ? "selected" : ""} onClick={() => void updatePreferences({ practiceQueueSortOrder:"oldest" }, "默认排序已设为最早优先。")}>最早优先</button>
       </div>
+    </section>
+
+    <section className="form-panel settings-panel">
+      <SectionTitle>Data</SectionTitle>
+      <div className="settings-summary"><Icon name="spark" /><div><strong>清空所有 GroovinLog 数据</strong><p>只删除当前数据后端里的产品数据，不删除账号、邮箱、密码或登录状态。</p></div></div>
+      {clearError && <p className="form-error" role="alert">{clearError}</p>}
+      {!clearConfirmOpen ? <button type="button" className="secondary-button danger-button account-action" disabled={clearLoading} onClick={() => void openClearConfirmation()}>{clearLoading ? "读取数量中…" : "Clear All Data"}</button> : <div className="danger-zone">
+        <strong>确认清空所有数据</strong>
+        <p>这会删除当前 {clearPreview?.backend === "cloud" ? "Supabase 云端" : "本机浏览器"} 后端中的 Class Reviews、Practice Tasks、Practice Logs、Weekly Reflections 和 Preferences。Your account and login will not be deleted.</p>
+        {clearPreview && <dl className="clear-data-counts">
+          <div><dt>Class Reviews</dt><dd>{clearPreview.classReviews}</dd></div>
+          <div><dt>Practice Tasks</dt><dd>{clearPreview.practiceTasks}</dd></div>
+          <div><dt>Practice Logs</dt><dd>{clearPreview.practiceLogs}</dd></div>
+          <div><dt>Weekly Reflections</dt><dd>{clearPreview.weeklyReflections}</dd></div>
+          <div><dt>Preferences</dt><dd>{clearPreview.preferences}</dd></div>
+        </dl>}
+        <label><span>输入 DELETE 以确认</span><input value={clearConfirmText} onChange={event => setClearConfirmText(event.target.value)} disabled={clearLoading} autoCapitalize="characters" autoComplete="off" /></label>
+        <div className="record-actions"><button type="button" disabled={clearLoading} onClick={cancelClearConfirmation}>Cancel</button><button type="button" className="danger-button" disabled={clearLoading || clearConfirmText !== "DELETE"} onClick={() => void clearAllData()}>{clearLoading ? "Deleting…" : "Permanently Delete All Data"}</button></div>
+      </div>}
+      <p className="settings-help">云端模式只清云端，不会同步删除本机 localStorage；本机模式只清 GroovinLog 的已知 localStorage keys。</p>
     </section>
 
     <div className="pwa-note settings-note"><Icon name="spark" /><p>登录且完成迁移后，偏好会保存到云端；否则保存在本机浏览器中。</p></div>

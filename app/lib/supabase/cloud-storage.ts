@@ -10,11 +10,13 @@ type CloudClient = Awaited<ReturnType<typeof createClient>>;
 type CloudUser = { id: string; email?: string | null };
 type ClassReviewRow = Database["public"]["Tables"]["class_reviews"]["Row"];
 type ClassReviewInsert = Database["public"]["Tables"]["class_reviews"]["Insert"];
+type ClassReviewUpdate = Database["public"]["Tables"]["class_reviews"]["Update"];
 type PracticeTaskRow = Database["public"]["Tables"]["practice_tasks"]["Row"];
 type PracticeTaskInsert = Database["public"]["Tables"]["practice_tasks"]["Insert"];
 type PracticeTaskUpdate = Database["public"]["Tables"]["practice_tasks"]["Update"];
 type PracticeLogRow = Database["public"]["Tables"]["practice_logs"]["Row"];
 type PracticeLogInsert = Database["public"]["Tables"]["practice_logs"]["Insert"];
+type PracticeLogUpdate = Database["public"]["Tables"]["practice_logs"]["Update"];
 type WeeklyReflectionRow = Database["public"]["Tables"]["weekly_reflections"]["Row"];
 type WeeklyReflectionInsert = Database["public"]["Tables"]["weekly_reflections"]["Insert"];
 type UserPreferencesRow = Database["public"]["Tables"]["user_preferences"]["Row"];
@@ -200,6 +202,23 @@ function classReviewToRow(review: ClassReview, userId: string): ClassReviewInser
   };
 }
 
+function classReviewPatchToRow(patch: Partial<Omit<ClassReview, "id" | "tasks" | "createdAt">>): ClassReviewUpdate {
+  const row: ClassReviewUpdate = {};
+  if ("date" in patch && patch.date !== undefined) row.class_date = patch.date;
+  if ("teacher" in patch && patch.teacher !== undefined) row.teacher = patch.teacher;
+  if ("danceStyle" in patch && patch.danceStyle !== undefined) row.dance_style = patch.danceStyle;
+  if ("classTheme" in patch && patch.classTheme !== undefined) row.class_theme = patch.classTheme;
+  if ("difficulty" in patch) row.difficulty = patch.difficulty ?? null;
+  if ("classCondition" in patch) row.class_condition = patch.classCondition ?? null;
+  if ("whatILearned" in patch && patch.whatILearned !== undefined) row.what_i_learned = patch.whatILearned;
+  if ("notDigested" in patch && patch.notDigested !== undefined) row.not_digested = patch.notDigested;
+  if ("videoReference" in patch) {
+    row.video_reference_type = patch.videoReference?.value ? patch.videoReference.type : null;
+    row.video_reference_value = patch.videoReference?.value ? patch.videoReference.value : null;
+  }
+  return row;
+}
+
 function practiceTaskToRow(task: PracticeTask, userId: string, classReviewId = task.classReviewId): PracticeTaskInsert {
   return {
     id:task.id,
@@ -248,6 +267,19 @@ function practiceLogToRow(log: PracticeLog, userId: string): PracticeLogInsert {
     next_focus:log.nextFocus,
     created_at:log.createdAt,
   };
+}
+
+function practiceLogPatchToRow(patch: Partial<Omit<PracticeLog, "id" | "taskId" | "classId" | "createdAt">>): PracticeLogUpdate {
+  const row: PracticeLogUpdate = {};
+  if ("date" in patch && patch.date !== undefined) row.practice_date = patch.date;
+  if ("durationUnit" in patch && patch.durationUnit !== undefined) row.duration_unit = patch.durationUnit;
+  if ("durationValue" in patch && patch.durationValue !== undefined) row.duration_value = patch.durationValue;
+  if ("durationMinutes" in patch) row.duration_minutes = patch.durationMinutes ?? null;
+  if ("songsCount" in patch) row.songs_count = patch.songsCount ?? null;
+  if ("practiceContent" in patch && patch.practiceContent !== undefined) row.practice_content = patch.practiceContent;
+  if ("progressScore" in patch && patch.progressScore !== undefined) row.progress_score = patch.progressScore;
+  if ("nextFocus" in patch && patch.nextFocus !== undefined) row.next_focus = patch.nextFocus;
+  return row;
 }
 
 function weeklyReflectionToRow(reflection: WeeklyReflection, userId: string): WeeklyReflectionInsert {
@@ -351,6 +383,20 @@ export async function saveClassReviewCloud(review: ClassReview): Promise<void> {
   assertNoCloudError(taskError, "Failed to save cloud class review tasks.");
 }
 
+export async function updateClassReviewCloud(reviewId: string, patch: Partial<Omit<ClassReview, "id" | "tasks" | "createdAt">>): Promise<void> {
+  const supabase = await getCloudClient();
+  const user = await requireAuthenticatedUser(supabase);
+  const { error } = await supabase.from("class_reviews").update(classReviewPatchToRow(patch)).eq("user_id", user.id).eq("id", reviewId);
+  assertNoCloudError(error, "Failed to update cloud class review.");
+}
+
+export async function deleteClassReviewCloud(reviewId: string): Promise<void> {
+  const supabase = await getCloudClient();
+  const user = await requireAuthenticatedUser(supabase);
+  const { error } = await supabase.from("class_reviews").delete().eq("user_id", user.id).eq("id", reviewId);
+  assertNoCloudError(error, "Failed to delete cloud class review.");
+}
+
 export async function saveStandaloneTaskCloud(task: PracticeTask): Promise<void> {
   const supabase = await getCloudClient();
   const user = await requireAuthenticatedUser(supabase);
@@ -380,6 +426,15 @@ export async function updatePracticeTaskCloud(taskId: string, patch: Partial<Pra
   assertNoCloudError(error, "Failed to update cloud practice task.");
 }
 
+export async function deletePracticeTaskCloud(taskId: string): Promise<void> {
+  const supabase = await getCloudClient();
+  const user = await requireAuthenticatedUser(supabase);
+  const { error:logError } = await supabase.from("practice_logs").delete().eq("user_id", user.id).eq("task_id", taskId);
+  assertNoCloudError(logError, "Failed to delete cloud practice logs for task.");
+  const { error:taskError } = await supabase.from("practice_tasks").delete().eq("user_id", user.id).eq("id", taskId);
+  assertNoCloudError(taskError, "Failed to delete cloud practice task.");
+}
+
 export async function savePracticeLogCloud(log: PracticeLog): Promise<void> {
   const supabase = await getCloudClient();
   const user = await requireAuthenticatedUser(supabase);
@@ -389,11 +444,47 @@ export async function savePracticeLogCloud(log: PracticeLog): Promise<void> {
   assertNoCloudError(taskError, "Failed to update cloud practice task status.");
 }
 
+export async function updatePracticeLogCloud(logId: string, patch: Partial<Omit<PracticeLog, "id" | "taskId" | "classId" | "createdAt">>): Promise<void> {
+  const supabase = await getCloudClient();
+  const user = await requireAuthenticatedUser(supabase);
+  const { error } = await supabase.from("practice_logs").update(practiceLogPatchToRow(patch)).eq("user_id", user.id).eq("id", logId);
+  assertNoCloudError(error, "Failed to update cloud practice log.");
+}
+
+export async function deletePracticeLogCloud(logId: string): Promise<void> {
+  const supabase = await getCloudClient();
+  const user = await requireAuthenticatedUser(supabase);
+  const { error } = await supabase.from("practice_logs").delete().eq("user_id", user.id).eq("id", logId);
+  assertNoCloudError(error, "Failed to delete cloud practice log.");
+}
+
 export async function saveWeeklyReflectionCloud(reflection: WeeklyReflection): Promise<void> {
   const supabase = await getCloudClient();
   const user = await requireAuthenticatedUser(supabase);
   const { error } = await supabase.from("weekly_reflections").upsert(weeklyReflectionToRow(reflection, user.id), { onConflict:"user_id,week_start" });
   assertNoCloudError(error, "Failed to save cloud weekly reflection.");
+}
+
+export async function deleteWeeklyReflectionCloud(reflectionId: string): Promise<void> {
+  const supabase = await getCloudClient();
+  const user = await requireAuthenticatedUser(supabase);
+  const { error } = await supabase.from("weekly_reflections").delete().eq("user_id", user.id).eq("id", reflectionId);
+  assertNoCloudError(error, "Failed to delete cloud weekly reflection.");
+}
+
+export async function clearAllUserDataCloud(): Promise<void> {
+  const supabase = await getCloudClient();
+  const user = await requireAuthenticatedUser(supabase);
+  const { error:logError } = await supabase.from("practice_logs").delete().eq("user_id", user.id);
+  assertNoCloudError(logError, "Failed to clear cloud practice logs.");
+  const { error:taskError } = await supabase.from("practice_tasks").delete().eq("user_id", user.id);
+  assertNoCloudError(taskError, "Failed to clear cloud practice tasks.");
+  const { error:classError } = await supabase.from("class_reviews").delete().eq("user_id", user.id);
+  assertNoCloudError(classError, "Failed to clear cloud class reviews.");
+  const { error:reflectionError } = await supabase.from("weekly_reflections").delete().eq("user_id", user.id);
+  assertNoCloudError(reflectionError, "Failed to clear cloud weekly reflections.");
+  const { error:preferencesError } = await supabase.from("user_preferences").delete().eq("user_id", user.id);
+  assertNoCloudError(preferencesError, "Failed to clear cloud preferences.");
 }
 
 export async function savePreferencesCloud(preferences: Partial<AppPreferences>): Promise<AppPreferences> {
